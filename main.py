@@ -35,10 +35,12 @@ def index():
         output_dir = os.path.join(OUTPUT_FOLDER, base_name)
         os.makedirs(output_dir, exist_ok=True)
 
-        os.rename(test_path, os.path.join(output_dir, os.path.basename(test_path)))
-        os.rename(sol_path, os.path.join(output_dir, os.path.basename(sol_path)))
+        new_test_path = os.path.join(output_dir, os.path.basename(test_path))
+        new_sol_path = os.path.join(output_dir, os.path.basename(sol_path))
+        os.rename(test_path, new_test_path)
+        os.rename(sol_path, new_sol_path)
 
-        with pdfplumber.open(test_path) as pdf:
+        with pdfplumber.open(new_test_path) as pdf:
             for i, page in enumerate(pdf.pages[:5]):
                 image = page.to_image(resolution=150)
                 filename = f"{base_name}_{10 + i:06d}.png"
