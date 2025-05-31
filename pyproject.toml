@@ -12,6 +12,8 @@ fitz = "^0.0.1.dev2"
 pdfplumber = "^0.11.6"
 werkzeug = "^3.1.3"
 pymupdf = "^1.26.0"
+pypdf2 = "^3.0.1"
+pillow = "^11.2.1"
 
 [tool.pyright]
 # https://github.com/microsoft/pyright/blob/main/docs/configuration.md
