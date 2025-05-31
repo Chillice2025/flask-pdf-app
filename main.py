@@ -3,11 +3,11 @@ from flask import Flask, request, send_file, render_template
 import os
 import pdfplumber
 from PyPDF2 import PdfReader
-from PIL import Image, ImageDraw
+from PIL import Image
 import zipfile
 from werkzeug.utils import secure_filename
 import re
-import fitz  # PyMuPDF for better image handling
+import fitz  # PyMuPDF for image handling
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
@@ -16,104 +16,97 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 def extract_question_regions(pdf_path):
-    """Extract question regions from PDF using text analysis"""
+    """
+    Extract question and choice bounding boxes from PDF using pdfplumber.
+    Returns list of questions with bounding boxes for question text and choices.
+    """
     questions = []
-    
+
+    question_pattern = r'^\s*(\d+)[\.\)]\s*'
+    choice_pattern = r'^\s*([A-D])\s*[\)\.]?\s*(.*)'
+
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages):
-            text = page.extract_text()
-            if not text:
-                continue
-                
-            # Find question numbers (looking for patterns like "1.", "2)", etc.)
-            question_pattern = r'^\s*(\d+)[\.\)]\s*'
-            lines = text.split('\n')
-            
+            # Group words by their vertical positions (lines)
+            words = page.extract_words()
+            # We'll reconstruct lines by grouping words with similar 'top' values
+            lines_dict = {}
+            for w in words:
+                top = round(w['top'])
+                if top not in lines_dict:
+                    lines_dict[top] = []
+                lines_dict[top].append(w)
+            # Sort lines by top position
+            sorted_tops = sorted(lines_dict.keys())
+
             current_question = None
-            for i, line in enumerate(lines):
-                match = re.match(question_pattern, line.strip())
-                if match:
+            for top in sorted_tops:
+                line_words = lines_dict[top]
+                line_text = " ".join(w['text'] for w in line_words).strip()
+
+                # Check if line starts with a question number
+                q_match = re.match(question_pattern, line_text)
+                if q_match:
+                    # Save previous question if exists
                     if current_question:
                         questions.append(current_question)
-                    
-                    question_num = int(match.group(1))
+
+                    question_num = int(q_match.group(1))
+                    # Get bounding box of the entire line for question
+                    x0 = min(w['x0'] for w in line_words)
+                    top = min(w['top'] for w in line_words)
+                    x1 = max(w['x1'] for w in line_words)
+                    bottom = max(w['bottom'] for w in line_words)
+
                     current_question = {
                         'number': question_num,
                         'page': page_num,
-                        'text_start': i,
-                        'content': line,
-                        'choices': []
+                        'question_bbox': (x0, top, x1, bottom),
+                        'choices': [],
+                        'content_lines': [line_text]
                     }
-                elif current_question and line.strip():
-                    # Look for answer choices (A), B), etc.
-                    choice_pattern = r'^\s*([A-D])\s*[\)\.]?\s*(.*)'
-                    choice_match = re.match(choice_pattern, line.strip())
-                    if choice_match:
-                        choice_letter = choice_match.group(1)
-                        choice_text = choice_match.group(2)
+                elif current_question:
+                    # Check if line is a choice
+                    c_match = re.match(choice_pattern, line_text)
+                    if c_match:
+                        choice_letter = c_match.group(1)
+                        # bounding box of this line = choice bbox
+                        x0 = min(w['x0'] for w in line_words)
+                        top = min(w['top'] for w in line_words)
+                        x1 = max(w['x1'] for w in line_words)
+                        bottom = max(w['bottom'] for w in line_words)
+
                         current_question['choices'].append({
                             'letter': choice_letter,
-                            'text': choice_text,
-                            'line': i
+                            'bbox': (x0, top, x1, bottom),
+                            'text': line_text
                         })
                     else:
-                        current_question['content'] += ' ' + line
-            
+                        # Append line text to question content
+                        current_question['content_lines'].append(line_text)
+
+            # Append last question of the page
             if current_question:
                 questions.append(current_question)
-    
+
     return questions
 
-def find_solution_for_question(sol_pdf_path, question_num):
-    """Find the solution for a specific question in the solution PDF"""
-    with pdfplumber.open(sol_pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages):
-            text = page.extract_text()
-            if not text:
-                continue
-            
-            # Look for question number in solution
-            pattern = rf'\b{question_num}[\.\)]\s*'
-            if re.search(pattern, text):
-                return page_num
-    
-    return None
+def fitz_rect_from_bbox(bbox, zoom=2):
+    """
+    Convert pdfplumber bbox to fitz.Rect scaled by zoom factor.
+    bbox = (x0, top, x1, bottom)
+    """
+    x0, y0, x1, y1 = bbox
+    return fitz.Rect(x0 * zoom, y0 * zoom, x1 * zoom, y1 * zoom)
 
-def create_question_screenshot(pdf_path, page_num, question_info, output_path):
-    """Create screenshot of question without the number"""
+def create_cropped_screenshot(pdf_path, page_num, bbox, output_path, zoom=2):
+    """Create cropped screenshot of given bbox in PDF page with zoom."""
     doc = fitz.open(pdf_path)
     page = doc[page_num]
-    
-    # Get page as image
-    mat = fitz.Matrix(2, 2)  # 2x zoom for better quality
-    pix = page.get_pixmap(matrix=mat)
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    
-    # For now, take full page - in a real implementation you'd need to
-    # identify text regions and crop accordingly
-    img.save(output_path)
-    doc.close()
+    mat = fitz.Matrix(zoom, zoom)
 
-def create_choice_screenshot(pdf_path, page_num, choice_info, output_path):
-    """Create screenshot of individual answer choice"""
-    doc = fitz.open(pdf_path)
-    page = doc[page_num]
-    
-    mat = fitz.Matrix(2, 2)
-    pix = page.get_pixmap(matrix=mat)
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    
-    # For now, take full page - would need region detection for actual cropping
-    img.save(output_path)
-    doc.close()
-
-def create_solution_screenshot(sol_pdf_path, page_num, output_path):
-    """Create screenshot of solution"""
-    doc = fitz.open(sol_pdf_path)
-    page = doc[page_num]
-    
-    mat = fitz.Matrix(2, 2)
-    pix = page.get_pixmap(matrix=mat)
+    rect = fitz_rect_from_bbox(bbox, zoom)
+    pix = page.get_pixmap(matrix=mat, clip=rect, alpha=False)  # alpha=False for white bg
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     img.save(output_path)
     doc.close()
@@ -122,6 +115,29 @@ def create_blank_image(output_path, width=800, height=600):
     """Create a blank white image"""
     img = Image.new('RGB', (width, height), 'white')
     img.save(output_path)
+
+def find_solution_for_question(sol_pdf_path, question_num):
+    """Find the solution page number for a given question number."""
+    with pdfplumber.open(sol_pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages):
+            text = page.extract_text()
+            if not text:
+                continue
+
+            pattern = rf'\b{question_num}[\.\)]\s*'
+            if re.search(pattern, text):
+                return page_num
+    return None
+
+def create_solution_screenshot(sol_pdf_path, page_num, output_path, zoom=2):
+    """Create full page screenshot for solution page."""
+    doc = fitz.open(sol_pdf_path)
+    page = doc[page_num]
+    mat = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=mat, alpha=False)
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    img.save(output_path)
+    doc.close()
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -133,51 +149,48 @@ def index():
         test_pdf.save(test_path)
         sol_pdf.save(sol_path)
 
-        # Extract text from both PDFs to get better parsing
+        # Extract combined text for metadata extraction
         with pdfplumber.open(test_path) as pdf:
             test_text = ""
             for page in pdf.pages[:3]:
-                page_text = page.extract_text()
-                if page_text:
-                    test_text += page_text + " "
-        
+                pt = page.extract_text()
+                if pt:
+                    test_text += pt + " "
         with pdfplumber.open(sol_path) as pdf:
             sol_text = ""
             for page in pdf.pages[:3]:
-                page_text = page.extract_text()
-                if page_text:
-                    sol_text += page_text + " "
-        
-        # Combine text for better parsing
+                pt = page.extract_text()
+                if pt:
+                    sol_text += pt + " "
         combined_text = test_text + " " + sol_text
-        
-        # Extract year (look for 4-digit numbers, prefer 20xx years)
+
+        # Extract year
         words = combined_text.split()
         year_candidates = [word for word in words if word.isdigit() and len(word) == 4 and word.startswith('20')]
         if not year_candidates:
             year_candidates = [word for word in words if word.isdigit() and len(word) == 4]
         year = year_candidates[0] if year_candidates else "UnknownYear"
-        
+
         # Extract month
-        months = {"January": "Jan", "February": "Feb", "March": "Mar", "April": "Apr", 
-                 "May": "May", "June": "Jun", "July": "Jul", "August": "Aug",
-                 "September": "Sep", "October": "Oct", "November": "Nov", "December": "Dec"}
+        months = {"January": "Jan", "February": "Feb", "March": "Mar", "April": "Apr",
+                  "May": "May", "June": "Jun", "July": "Jul", "August": "Aug",
+                  "September": "Sep", "October": "Oct", "November": "Nov", "December": "Dec"}
         month = "UnknownMonth"
         for full_month, short_month in months.items():
             if full_month in combined_text or short_month in combined_text:
                 month = short_month
                 break
-        
-        # Extract type (Regional or Invitational)
+
+        # Extract type
         type_ = "Reg" if "Regional" in combined_text else "Inv" if "Invitational" in combined_text else "Inv"
-        
+
         # Extract level
         level = "UnknownLevel"
         for lvl in ["Algebra 1", "Geometry", "Algebra 2", "Precalculus", "Calculus", "Statistics"]:
             if lvl in combined_text:
                 level = lvl.replace(" ", "")
                 break
-        
+
         # Extract individual vs team
         indiv = "Indiv" if "Individual" in combined_text else "Team" if "Team" in combined_text else "Unknown"
 
@@ -190,51 +203,44 @@ def index():
         os.rename(test_path, new_test_path)
         os.rename(sol_path, new_sol_path)
 
-        # Extract questions from test PDF
+        # Extract questions and choices with bounding boxes
         questions = extract_question_regions(new_test_path)
-        
-        # Process each question
+
         for question in questions:
             q_num = question['number']
-            
-            # Calculate base number for this question (question 1 = 00010, question 2 = 00100, etc.)
+
+            # base number for filenames
             if q_num < 10:
                 base_num = q_num * 10
             else:
                 base_num = q_num * 100
-            
-            # 1. Question screenshot (without number) - 00010, 00100, etc.
+
+            # 1. Question screenshot (cropped to question bbox)
             question_filename = f"{base_name}_{base_num:06d}.png"
-            create_question_screenshot(new_test_path, question['page'], question, 
+            create_cropped_screenshot(new_test_path, question['page'], question['question_bbox'],
                                      os.path.join(output_dir, question_filename))
-            
-            # 2. Answer choice screenshots (A-D) - 00011-00014, 00101-00104, etc.
+
+            # 2. Answer choice screenshots (A-D), cropped to choice bbox or blank if missing
             choice_letters = ['A', 'B', 'C', 'D']
             for i, letter in enumerate(choice_letters):
                 choice_filename = f"{base_name}_{base_num + i + 1:06d}.png"
-                # Find the choice in the question
-                choice_found = False
-                for choice in question['choices']:
-                    if choice['letter'] == letter:
-                        create_choice_screenshot(new_test_path, question['page'], choice,
-                                               os.path.join(output_dir, choice_filename))
-                        choice_found = True
-                        break
-                
-                if not choice_found:
-                    # Create blank image if choice not found
+                choice_obj = next((c for c in question['choices'] if c['letter'] == letter), None)
+                if choice_obj:
+                    create_cropped_screenshot(new_test_path, question['page'], choice_obj['bbox'],
+                                             os.path.join(output_dir, choice_filename))
+                else:
                     create_blank_image(os.path.join(output_dir, choice_filename))
-            
-            # 3. Solution screenshot - 00015, 00105, etc.
+
+            # 3. Solution screenshot (full page)
             solution_filename = f"{base_name}_{base_num + 5:06d}.png"
             sol_page = find_solution_for_question(new_sol_path, q_num)
             if sol_page is not None:
-                create_solution_screenshot(new_sol_path, sol_page, 
+                create_solution_screenshot(new_sol_path, sol_page,
                                          os.path.join(output_dir, solution_filename))
             else:
                 create_blank_image(os.path.join(output_dir, solution_filename))
-            
-            # 4. Four blank screenshots - 00016-00019, 00106-00109, etc.
+
+            # 4. Four blank screenshots
             for i in range(4):
                 blank_filename = f"{base_name}_{base_num + 6 + i:06d}.png"
                 create_blank_image(os.path.join(output_dir, blank_filename))
@@ -250,4 +256,9 @@ def index():
     return render_template("index.html")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    import os
+    port = int(os.environ.get("PORT", 3000))
+    print(f"Starting app on port {port}")
+    app.run(host="0.0.0.0", port=port, debug=True)
+
+
