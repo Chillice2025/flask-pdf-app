@@ -9,89 +9,83 @@ from werkzeug.utils import secure_filename
 import re
 import fitz  # PyMuPDF for image handling
 
+
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "output"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-def extract_question_regions(pdf_path):
+def extract_solution_regions(pdf_path):
     """
-    Extract question and choice bounding boxes from PDF using pdfplumber.
-    Returns list of questions with bounding boxes for question text and choices.
+    Extract solution bounding boxes per question from solution PDF.
+    Returns list of dicts with question number, page number, and solution bbox.
     """
-    questions = []
-
-    question_pattern = r'^\s*(\d+)[\.\)]\s*'
-    choice_pattern = r'^\s*([A-D])\s*[\)\.]?\s*(.*)'
+    solutions = []
+    solution_pattern = r'^\s*(\d+)[\.\)]\s*'
 
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages):
-            # Group words by their vertical positions (lines)
             words = page.extract_words()
-            # We'll reconstruct lines by grouping words with similar 'top' values
             lines_dict = {}
             for w in words:
                 top = round(w['top'])
                 if top not in lines_dict:
                     lines_dict[top] = []
                 lines_dict[top].append(w)
-            # Sort lines by top position
+
             sorted_tops = sorted(lines_dict.keys())
 
-            current_question = None
+            current_solution_num = None
+            content_lines = []
+            bbox_x0 = bbox_top = bbox_x1 = bbox_bottom = None
+
             for top in sorted_tops:
+                bbox_x0 = float('inf')    # for min calculations
+                bbox_top = float('inf')
+                bbox_x1 = float('-inf')   # for max calculations
+                bbox_bottom = float('-inf')
+
                 line_words = lines_dict[top]
                 line_text = " ".join(w['text'] for w in line_words).strip()
 
-                # Check if line starts with a question number
-                q_match = re.match(question_pattern, line_text)
-                if q_match:
-                    # Save previous question if exists
-                    if current_question:
-                        questions.append(current_question)
+                sol_match = re.match(solution_pattern, line_text)
+                if sol_match:
+                    # Save previous solution
+                    if current_solution_num is not None:
+                        solutions.append({
+                            'number': current_solution_num,
+                            'page': page_num,
+                            'solution_bbox': (bbox_x0, bbox_top, bbox_x1, bbox_bottom),
+                            'content_lines': content_lines
+                        })
 
-                    question_num = int(q_match.group(1))
-                    # Get bounding box of the entire line for question
-                    x0 = min(w['x0'] for w in line_words)
-                    top_pos = min(w['top'] for w in line_words)
-                    x1 = max(w['x1'] for w in line_words)
-                    bottom = max(w['bottom'] for w in line_words)
+                    current_solution_num = int(sol_match.group(1))
+                    content_lines = [line_text]
 
-                    current_question = {
-                        'number': question_num,
-                        'page': page_num,
-                        'question_bbox': (x0, top_pos, x1, bottom),
-                        'choices': [],
-                        'content_lines': [line_text]
-                    }
+                    bbox_x0 = min(w['x0'] for w in line_words)
+                    bbox_top = min(w['top'] for w in line_words)
+                    bbox_x1 = max(w['x1'] for w in line_words)
+                    bbox_bottom = max(w['bottom'] for w in line_words)
 
-                elif current_question:
-                    # Only match and include choices A–D, one line each
-                    c_match = re.match(choice_pattern, line_text)
-                    if c_match:
-                        choice_letter = c_match.group(1)
-                        if choice_letter in ['A', 'B', 'C', 'D']:  # skip E and others
-                            x0 = min(w['x0'] for w in line_words)
-                            top_pos = min(w['top'] for w in line_words)
-                            x1 = max(w['x1'] for w in line_words)
-                            bottom = max(w['bottom'] for w in line_words)
+                elif current_solution_num is not None:
+                    content_lines.append(line_text)
+                    bbox_x0 = min(bbox_x0, min(w['x0'] for w in line_words))
+                    bbox_top = min(bbox_top, min(w['top'] for w in line_words))
+                    bbox_x1 = max(bbox_x1, max(w['x1'] for w in line_words))
+                    bbox_bottom = max(bbox_bottom, max(w['bottom'] for w in line_words))
 
-                            # Only save THIS line as the bbox — do NOT accumulate
-                            current_question['choices'].append({
-                                'letter': choice_letter,
-                                'bbox': (x0, top_pos, x1, bottom),
-                                'text': line_text
-                            })
-                    else:
-                        # Append line text to question content
-                        current_question['content_lines'].append(line_text)
+            # Save last solution on page
+            if current_solution_num is not None:
+                solutions.append({
+                    'number': current_solution_num,
+                    'page': page_num,
+                    'solution_bbox': (bbox_x0, bbox_top, bbox_x1, bbox_bottom),
+                    'content_lines': content_lines
+                })
 
-            # Append last question of the page
-            if current_question:
-                questions.append(current_question)
+    return solutions
 
-    return questions
 
 def fitz_rect_from_bbox(bbox, zoom=2):
     """
@@ -259,15 +253,17 @@ def index():
 
 
             # 3. Solution screenshot (full page)
+            # Find matching solution for this question
+            sol = next((s for s in solutions if s['number'] == q_num), None)
             solution_index = base_num + 5
             solution_filename = f"{solution_index:06d}_{base_name}.png"
+            solution_path = os.path.join(output_dir, solution_filename)
 
-            sol_page = find_solution_for_question(new_sol_path, q_num)
-            if sol_page is not None:
-                create_solution_screenshot(new_sol_path, sol_page,
-                                         os.path.join(output_dir, solution_filename))
+            if sol:
+                create_cropped_screenshot(new_sol_path, sol['page'], sol['solution_bbox'], solution_path)
             else:
-                create_blank_image(os.path.join(output_dir, solution_filename))
+                create_blank_image(solution_path)
+
 
             # 4. Four blank screenshots
             
