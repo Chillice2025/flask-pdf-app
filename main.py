@@ -219,8 +219,8 @@ def find_solution_for_question(sol_pdf_path, question_num):
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        test_pdf = request.files['test_pdf']
-        solution_pdf = request.files['solution_pdf']
+        test_pdf = request.files.get("test_pdf")
+        solution_pdf = request.files.get("solution_pdf")
         test_pdf = request.files.get("test_pdf")
         sol_pdf = request.files.get("sol_pdf")
         level = request.form['level']
@@ -245,7 +245,7 @@ def index():
         new_solution_path = os.path.join(UPLOAD_FOLDER, solution_filename)
 
         test_pdf.save(new_test_path)
-        solution_pdf.save(new_solution_path)
+        sol_pdf.save(new_solution_path)
 
         questions = extract_question_regions(new_test_path)
         solutions = extract_solution_regions(new_solution_path)
