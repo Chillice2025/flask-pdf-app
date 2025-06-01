@@ -210,6 +210,12 @@ def index():
         # Extract individual vs team
         indiv = "Indiv" if "Individual" in combined_text else "Team" if "Team" in combined_text else "Unknown"
 
+        # Use user input
+        year = request.form.get("year", "UnknownYear")
+        month = request.form.get("month", "UnknownMonth")
+        type_ = request.form.get("type", "Inv")
+        level = request.form.get("level", "UnknownLevel").replace(" ", "")
+        indiv = request.form.get("indiv", "Indiv")
         base_name = f"{year}_{month}_{type_}_{level}_{indiv}"
         output_dir = os.path.join(OUTPUT_FOLDER, base_name)
         os.makedirs(output_dir, exist_ok=True)
