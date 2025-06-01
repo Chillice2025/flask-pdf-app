@@ -3,3 +3,5 @@ pdfplumber
 PyMuPDF
 Pillow
 PyPDF2
+werkzeug
+gunicorn
