@@ -1,12 +1,12 @@
-from flask import Flask, request, send_file, render_template
 import os
-import pdfplumber
-from PyPDF2 import PdfReader
-from PIL import Image
-import zipfile
-from werkzeug.utils import secure_filename
 import re
+import zipfile
+
 import fitz  # PyMuPDF for image handling
+import pdfplumber
+from flask import Flask, render_template, request, send_file
+from PIL import Image
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
@@ -48,6 +48,10 @@ def extract_question_regions(pdf_path):
             for top in sorted_tops:
                 line_words = lines_dict[top]
                 line_text = " ".join(w['text'] for w in line_words).strip()
+                bbox_x0 = float('inf')
+                bbox_top = float('inf')
+                bbox_x1 = float('-inf')
+                bbox_bottom = float('-inf')
 
                 q_match = re.match(question_pattern, line_text)
                 c_match = None
@@ -131,6 +135,10 @@ def extract_solution_regions(pdf_path):
             for top in sorted_tops:
                 line_words = lines_dict[top]
                 line_text = " ".join(w['text'] for w in line_words).strip()
+                bbox_x0 = float('inf')
+                bbox_top = float('inf')
+                bbox_x1 = float('-inf')
+                bbox_bottom = float('-inf')
 
                 sol_match = re.match(solution_pattern, line_text)
                 if sol_match:
@@ -179,7 +187,8 @@ def create_cropped_screenshot(pdf_path, page_num, bbox, output_path, zoom=2):
     page = doc[page_num]
     mat = fitz.Matrix(zoom, zoom)
     pix_full = page.get_pixmap(matrix=mat, alpha=False)
-    img = Image.frombytes("RGB", [pix_full.width, pix_full.height], pix_full.samples)
+    pix = page.get_pixmap(matrix=mat, alpha=False)
+    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
     rect = fitz_rect_from_bbox(bbox, zoom)
     x0 = max(0, min(int(rect.x0), img.width))
     y0 = max(0, min(int(rect.y0), img.height))
@@ -212,10 +221,21 @@ def index():
     if request.method == 'POST':
         test_pdf = request.files['test_pdf']
         solution_pdf = request.files['solution_pdf']
+        test_pdf = request.files.get("test_pdf")
+        sol_pdf = request.files.get("sol_pdf")
         level = request.form['level']
         month = request.form['month']
         year = request.form['year']
         paper_type = request.form['type']
+
+        test_pdf = request.files.get("test_pdf")
+        sol_pdf = request.files.get("sol_pdf")
+
+        if test_pdf is None or sol_pdf is None:
+            return "Missing PDF upload", 400
+
+        test_filename = secure_filename(test_pdf.filename or "test.pdf")
+        solution_filename = secure_filename(sol_pdf.filename or "sol.pdf")
 
         test_path = os.path.join(UPLOAD_FOLDER, secure_filename(test_pdf.filename or "test.pdf"))
         sol_path = os.path.join(UPLOAD_FOLDER, secure_filename(sol_pdf.filename or "solution.pdf"))
