@@ -1,19 +1,82 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Auto Chopper</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Screenshot Extractor</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      text-align: center;
+    }
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    input[type="text"], select, input[type="file"] {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 20px;
+      width: 100%;
+      padding: 12px;
+      background-color: #007bff;
+      border: none;
+      color: white;
+      font-size: 1rem;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    .footer {
+      margin-top: 30px;
+      text-align: center;
+      color: #666;
+      font-size: 0.9rem;
+    }
+  </style>
 </head>
 <body>
-  <h2>Upload Test and Solution PDFs</h2>
-  <form method="post" enctype="multipart/form-data">
-    Test PDF: <input type="file" name="test_pdf"><br>
-    Solution PDF: <input type="file" name="sol_pdf"><br>
-    Year: <input type="text" name="year"><br>
-    Month: <input type="text" name="month"><br>
-    Type (Inv/Reg): <input type="text" name="type"><br>
-    Level (Algebra1, Geometry...): <input type="text" name="level"><br>
-    Individual/Team: <input type="text" name="indiv"><br>
-    <input type="submit" value="Submit">
+  <h1>PDF Screenshot Extractor</h1>
+  <form method="POST" enctype="multipart/form-data">
+    <label for="test_pdf">Test PDF file:</label>
+    <input type="file" name="test_pdf" id="test_pdf" accept="application/pdf" required />
+
+    <label for="sol_pdf">Solution PDF file:</label>
+    <input type="file" name="sol_pdf" id="sol_pdf" accept="application/pdf" required />
+
+    <label for="level">Level (e.g., Grade 10):</label>
+    <input type="text" name="level" id="level" placeholder="Level" required />
+
+    <label for="month">Month (e.g., March):</label>
+    <input type="text" name="month" id="month" placeholder="Month" required />
+
+    <label for="year">Year (e.g., 2025):</label>
+    <input type="text" name="year" id="year" placeholder="Year" required />
+
+    <label for="type">Exam type (e.g., Final):</label>
+    <input type="text" name="type" id="type" placeholder="Type" required />
+
+    <button type="submit">Upload and Process</button>
   </form>
+
+  <div class="footer">
+    &copy; 2025 PDF Screenshot Extractor
+  </div>
 </body>
 </html>
+
