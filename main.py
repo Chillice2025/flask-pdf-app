@@ -65,22 +65,26 @@ def extract_question_regions(pdf_path):
                         'choices': [],
                         'content_lines': [line_text]
                     }
-                elif current_question:
-                    # Check if line is a choice
+                    elif current_question:
+                    # Only match and include choices A–D, one line each
                     c_match = re.match(choice_pattern, line_text)
                     if c_match:
                         choice_letter = c_match.group(1)
-                        # bounding box of this line = choice bbox
-                        x0 = min(w['x0'] for w in line_words)
-                        top = min(w['top'] for w in line_words)
-                        x1 = max(w['x1'] for w in line_words)
-                        bottom = max(w['bottom'] for w in line_words)
+                        if choice_letter in ['A', 'B', 'C', 'D']:  # skip E and others
+                            x0 = min(w['x0'] for w in line_words)
+                            top = min(w['top'] for w in line_words)
+                            x1 = max(w['x1'] for w in line_words)
+                            bottom = max(w['bottom'] for w in line_words)
 
-                        current_question['choices'].append({
-                            'letter': choice_letter,
-                            'bbox': (x0, top, x1, bottom),
-                            'text': line_text
-                        })
+                            # Only save THIS line as the bbox — do NOT accumulate
+                            current_question['choices'].append({
+                                'letter': choice_letter,
+                                'bbox': (x0, top, x1, bottom),
+                                'text': line_text
+                     })
+
+
+                    
                     else:
                         # Append line text to question content
                         current_question['content_lines'].append(line_text)
