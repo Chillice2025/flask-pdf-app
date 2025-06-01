@@ -1,234 +1,117 @@
 import os
-import re
 import zipfile
-
 import fitz  # PyMuPDF
-import pdfplumber
-from flask import Flask, render_template, request, send_file
-from PIL import Image
+from flask import Flask, request, send_file, render_template
 from werkzeug.utils import secure_filename
+from PIL import Image
 
 app = Flask(__name__)
-UPLOAD_FOLDER = "uploads"
-OUTPUT_FOLDER = "output"
+UPLOAD_FOLDER = 'uploads'
+SCREENSHOTS_FOLDER = 'screenshots'
+RESULT_FOLDER = 'result'
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+os.makedirs(SCREENSHOTS_FOLDER, exist_ok=True)
+os.makedirs(RESULT_FOLDER, exist_ok=True)
 
-def extract_question_regions(pdf_path):
-    questions = []
-    question_pattern = r'^\s*(\d+)[\.\)]\s*'
-    choice_letters = ['A', 'B', 'C', 'D', 'E']
+def crop_and_save_image(page, bbox, save_path):
+    mat = fitz.Matrix(4, 4)
+    pix = page.get_pixmap(matrix=mat, clip=fitz.Rect(bbox))
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    img.save(save_path)
 
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages):
-            words = page.extract_words()
-            lines_dict = {}
-            for w in words:
-                top = round(w['top'])
-                lines_dict.setdefault(top, []).append(w)
+def process_pdfs(test_path, sol_path, metadata):
+    test_pdf = fitz.open(test_path)
+    sol_pdf = fitz.open(sol_path)
 
-            sorted_tops = sorted(lines_dict.keys())
-            current_question_num = None
-            choices = []
-            current_choice_letter = None
-            current_choice_bbox = None
-            question_bbox = None
+    base_name = f"{metadata['level']}_{metadata['month']}_{metadata['year']}_{metadata['type']}"
 
-            def save_question():
-                if current_question_num and question_bbox:
-                    questions.append({
-                        'number': current_question_num,
-                        'page': page_num,
-                        'question_bbox': question_bbox,
-                        'choices': choices.copy()
-                    })
+    zip_path = os.path.join(RESULT_FOLDER, f"screenshots_{base_name}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for q_num in range(1, len(test_pdf) + 1):
+            page = test_pdf[q_num - 1]
+            sol_page = sol_pdf[q_num - 1] if q_num <= len(sol_pdf) else None
 
-            for top in sorted_tops:
-                line_words = lines_dict[top]
-                line_text = " ".join(w['text'] for w in line_words).strip()
+            base_number = (q_num - 1) * 10
+            padding = 6
 
-                q_match = re.match(question_pattern, line_text)
-                c_match = next((letter for letter in choice_letters if re.match(rf'^{letter}[\.\)]\s*', line_text)), None)
+            def padded(num):
+                return str(num).zfill(padding)
 
-                line_bbox = (
-                    min(w['x0'] for w in line_words),
-                    min(w['top'] for w in line_words),
-                    max(w['x1'] for w in line_words),
-                    max(w['bottom'] for w in line_words)
-                )
+            # Sample bounding boxes (to be replaced with actual coordinates)
+            bboxes = {
+                'question': (50, 100, 550, 300),
+                'choices': [
+                    (60, 310, 540, 360),  # A
+                    (60, 370, 540, 420),  # B
+                    (60, 430, 540, 480),  # C
+                    (60, 490, 540, 540),  # D
+                ],
+                'solution': (50, 100, 550, 300)  # should be set to correct solution area
+            }
 
-                if q_match:
-                    save_question()
-                    current_question_num = int(q_match.group(1))
-                    question_bbox = line_bbox
-                    choices = []
-                    current_choice_letter = None
-                    current_choice_bbox = None
+            # 0 - question
+            q_img_name = f"{padded(base_number + 0)}_{base_name}.png"
+            q_img_path = os.path.join(SCREENSHOTS_FOLDER, q_img_name)
+            crop_and_save_image(page, bboxes['question'], q_img_path)
+            zipf.write(q_img_path, arcname=q_img_name)
 
-                elif c_match:
-                    if current_choice_letter and current_choice_bbox:
-                        choices.append({
-                            'letter': current_choice_letter,
-                            'bbox': current_choice_bbox
-                        })
-                    current_choice_letter = c_match
-                    current_choice_bbox = line_bbox
+            # 1-4 - choices A to D
+            for i, bbox in enumerate(bboxes['choices']):
+                choice_img_name = f"{padded(base_number + 1 + i)}_{base_name}.png"
+                choice_img_path = os.path.join(SCREENSHOTS_FOLDER, choice_img_name)
+                crop_and_save_image(page, bbox, choice_img_path)
+                zipf.write(choice_img_path, arcname=choice_img_name)
 
-                elif current_question_num:
-                    if question_bbox:
-                        question_bbox = (
-                            min(question_bbox[0], line_bbox[0]),
-                            min(question_bbox[1], line_bbox[1]),
-                            max(question_bbox[2], line_bbox[2]),
-                            max(question_bbox[3], line_bbox[3])
-                        )
-                    if current_choice_letter and current_choice_bbox:
-                        current_choice_bbox = (
-                            min(current_choice_bbox[0], line_bbox[0]),
-                            min(current_choice_bbox[1], line_bbox[1]),
-                            max(current_choice_bbox[2], line_bbox[2]),
-                            max(current_choice_bbox[3], line_bbox[3])
-                        )
+            # 5 - solution
+            if sol_page:
+                sol_img_name = f"{padded(base_number + 5)}_{base_name}.png"
+                sol_img_path = os.path.join(SCREENSHOTS_FOLDER, sol_img_name)
+                crop_and_save_image(sol_page, bboxes['solution'], sol_img_path)
+                zipf.write(sol_img_path, arcname=sol_img_name)
 
-            if current_choice_letter and current_choice_bbox:
-                choices.append({'letter': current_choice_letter, 'bbox': current_choice_bbox})
-            save_question()
+            # 6-9 - blank placeholders
+            for i in range(6, 10):
+                blank_img_name = f"{padded(base_number + i)}_{base_name}.png"
+                blank_img_path = os.path.join(SCREENSHOTS_FOLDER, blank_img_name)
+                Image.new('RGB', (100, 100), color='white').save(blank_img_path)
+                zipf.write(blank_img_path, arcname=blank_img_name)
 
-    for q in questions:
-        q['choices'] = [c for c in q['choices'] if c['letter'] in ['A', 'B', 'C', 'D']]
-    return questions
-
-def extract_solution_regions(pdf_path):
-    solutions = []
-    pattern = r'^\s*(\d+)[\.\)]\s*'
-
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages):
-            words = page.extract_words()
-            lines_dict = {}
-            for w in words:
-                top = round(w['top'])
-                lines_dict.setdefault(top, []).append(w)
-
-            sorted_tops = sorted(lines_dict.keys())
-            current_solution_num = None
-            content_lines = []
-            solution_bbox = None
-
-            def save_solution():
-                if current_solution_num and solution_bbox:
-                    solutions.append({
-                        'number': current_solution_num,
-                        'page': page_num,
-                        'solution_bbox': solution_bbox,
-                        'content_lines': content_lines.copy()
-                    })
-
-            for top in sorted_tops:
-                line_words = lines_dict[top]
-                line_text = " ".join(w['text'] for w in line_words).strip()
-                line_bbox = (
-                    min(w['x0'] for w in line_words),
-                    min(w['top'] for w in line_words),
-                    max(w['x1'] for w in line_words),
-                    max(w['bottom'] for w in line_words)
-                )
-
-                sol_match = re.match(pattern, line_text)
-                if sol_match:
-                    save_solution()
-                    current_solution_num = int(sol_match.group(1))
-                    solution_bbox = line_bbox
-                    content_lines = [line_text]
-                elif current_solution_num:
-                    content_lines.append(line_text)
-                    if solution_bbox:
-                        solution_bbox = (
-                            min(solution_bbox[0], line_bbox[0]),
-                            min(solution_bbox[1], line_bbox[1]),
-                            max(solution_bbox[2], line_bbox[2]),
-                            max(solution_bbox[3], line_bbox[3])
-                        )
-
-            save_solution()
-    return solutions
-
-def fitz_rect_from_bbox(bbox, zoom=2):
-    return fitz.Rect(*(coord * zoom for coord in bbox))
-
-def create_cropped_screenshot(pdf_path, page_num, bbox, output_path, zoom=2):
-    if not bbox or any(v is None or isinstance(v, float) and not (v < float('inf')) for v in bbox):
-        create_blank_image(output_path)
-        return
-
-    doc = fitz.open(pdf_path)
-    page = doc[page_num]
-    mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat)
-    img = Image.frombytes("RGB", (pix.width, pix.height), bytes(pix.samples))
-
-
-    rect = fitz_rect_from_bbox(bbox, zoom)
-    x0, y0, x1, y1 = map(int, [rect.x0, rect.y0, rect.x1, rect.y1])
-    if x1 > x0 and y1 > y0:
-        cropped = img.crop((x0, y0, x1, y1))
-        cropped.save(output_path)
-    else:
-        create_blank_image(output_path)
-    doc.close()
-
-def create_blank_image(output_path, width=800, height=600):
-    Image.new('RGB', (width, height), 'white').save(output_path)
+    return zip_path
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        test_pdf = request.files.get("test_pdf")
-        sol_pdf = request.files.get("sol_pdf")
-        level = request.form['level']
-        month = request.form['month']
-        year = request.form['year']
-        paper_type = request.form['type']
+        test_file = request.files.get('test_pdf')
+        sol_file = request.files.get('sol_pdf')
 
-        if not test_pdf or not sol_pdf:
-            return "Missing PDF upload", 400
+        if not test_file or not sol_file:
+            return 'Missing PDF upload', 400
 
-        test_filename = secure_filename(test_pdf.filename or "test.pdf")
-        sol_filename = secure_filename(sol_pdf.filename or "solution.pdf")
+        level = request.form.get('level', 'Unknown')
+        month = request.form.get('month', 'Unknown')
+        year = request.form.get('year', 'Unknown')
+        exam_type = request.form.get('type', 'Unknown')
+
+        test_filename = secure_filename(test_file.filename or 'test.pdf')
+        sol_filename = secure_filename(sol_file.filename or 'sol.pdf')
 
         test_path = os.path.join(UPLOAD_FOLDER, test_filename)
         sol_path = os.path.join(UPLOAD_FOLDER, sol_filename)
 
-        test_pdf.save(test_path)
-        sol_pdf.save(sol_path)
+        test_file.save(test_path)
+        sol_file.save(sol_path)
 
-        questions = extract_question_regions(test_path)
-        solutions = extract_solution_regions(sol_path)
-
-        zip_path = os.path.join(OUTPUT_FOLDER, "screenshots.zip")
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for q in questions:
-                q_num = q['number']
-                q_str = str(q_num).zfill(3)
-                base_name = f"{level}_{month}_{year}_{paper_type}_{q_str}"
-                q_img_path = os.path.join(OUTPUT_FOLDER, f"{base_name}.png")
-                create_cropped_screenshot(test_path, q['page'], q['question_bbox'], q_img_path)
-                zipf.write(q_img_path, os.path.basename(q_img_path))
-
-                for idx, choice in enumerate(q['choices']):
-                    choice_img_path = os.path.join(OUTPUT_FOLDER, f"{base_name}_{idx+1}.png")
-                    create_cropped_screenshot(test_path, q['page'], choice['bbox'], choice_img_path)
-                    zipf.write(choice_img_path, os.path.basename(choice_img_path))
-
-                solution = next((s for s in solutions if s['number'] == q_num), None)
-                if solution:
-                    sol_img_path = os.path.join(OUTPUT_FOLDER, f"{base_name}_solution.png")
-                    create_cropped_screenshot(sol_path, solution['page'], solution['solution_bbox'], sol_img_path)
-                    zipf.write(sol_img_path, os.path.basename(sol_img_path))
+        zip_path = process_pdfs(test_path, sol_path, {
+            'level': level,
+            'month': month,
+            'year': year,
+            'type': exam_type
+        })
 
         return send_file(zip_path, as_attachment=True)
 
-    return render_template("index.html")
+    return render_template('index.html')
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+if __name__ == '__main__':
+    app.run(debug=True)
