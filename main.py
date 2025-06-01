@@ -15,6 +15,22 @@ from werkzeug.utils import secure_filename
 import fitz  # PyMuPDF
 from PIL import Image, ImageDraw
 import openai
+from flask import redirect, url_for
+
+app = Flask(__name__) 
+
+@app.route("/upload", methods=["GET"])
+def upload_get():
+    return redirect(url_for("index"))
+# Add at the very top, before importing openai, to load the API key from env if exists:
+openai.api_key = os.environ.get("OPENAI_API_KEY") or openai.api_key
+
+if not openai.api_key:
+    logger.error("OpenAI API key not set in environment variable OPENAI_API_KEY")
+    raise RuntimeError("OpenAI API key is required. Please set the environment variable OPENAI_API_KEY.")
+
+# (You can keep your hardcoded key as fallback or remove it in production)
+
 
 # -------- Logging Setup --------
 logger = logging.getLogger(__name__)
@@ -429,7 +445,10 @@ def status():
 # -------- Main Entrypoint --------
 
 if __name__ == "__main__":
+    import os
     # Insert your OpenAI key here directly as per your request:
     openai.api_key = "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"
 
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
