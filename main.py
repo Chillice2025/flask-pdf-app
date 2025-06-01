@@ -238,23 +238,28 @@ def index():
                 base_num = q_num * 100
 
             # 1. Question screenshot (cropped to question bbox)
-            question_filename = f"{base_name}_{base_num:06d}.png"
+            question_filename = f"{base_num:06d}_{base_name}.png"
             create_cropped_screenshot(new_test_path, question['page'], question['question_bbox'],
                                      os.path.join(output_dir, question_filename))
+
 
             # 2. Answer choice screenshots (A-D), cropped to choice bbox or blank if missing
             choice_letters = ['A', 'B', 'C', 'D']
             for i, letter in enumerate(choice_letters):
-                choice_filename = f"{base_name}_{base_num + i + 1:06d}.png"
+                index_number = base_num + i + 1
+                choice_filename = f"{index_number:06d}_{base_name}.png"
                 choice_obj = next((c for c in question['choices'] if c['letter'] == letter), None)
                 if choice_obj:
                     create_cropped_screenshot(new_test_path, question['page'], choice_obj['bbox'],
-                                             os.path.join(output_dir, choice_filename))
+                                              os.path.join(output_dir, choice_filename))
                 else:
                     create_blank_image(os.path.join(output_dir, choice_filename))
 
+
             # 3. Solution screenshot (full page)
-            solution_filename = f"{base_name}_{base_num + 5:06d}.png"
+            solution_index = base_num + 5
+            solution_filename = f"{solution_index:06d}_{base_name}.png"
+
             sol_page = find_solution_for_question(new_sol_path, q_num)
             if sol_page is not None:
                 create_solution_screenshot(new_sol_path, sol_page,
@@ -263,9 +268,12 @@ def index():
                 create_blank_image(os.path.join(output_dir, solution_filename))
 
             # 4. Four blank screenshots
+            
             for i in range(4):
-                blank_filename = f"{base_name}_{base_num + 6 + i:06d}.png"
+                blank_index = base_num + 6 + i
+                blank_filename = f"{blank_index:06d}_{base_name}.png"
                 create_blank_image(os.path.join(output_dir, blank_filename))
+
 
         zip_path = os.path.join(OUTPUT_FOLDER, base_name + ".zip")
         with zipfile.ZipFile(zip_path, "w") as zipf:
