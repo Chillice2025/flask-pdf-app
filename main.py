@@ -100,16 +100,32 @@ def fitz_rect_from_bbox(bbox, zoom=2):
     return fitz.Rect(x0 * zoom, y0 * zoom, x1 * zoom, y1 * zoom)
 
 def create_cropped_screenshot(pdf_path, page_num, bbox, output_path, zoom=2):
-    """Create cropped screenshot of given bbox in PDF page with zoom."""
+    """Create cropped screenshot of given bbox in PDF page with zoom, safely."""
     doc = fitz.open(pdf_path)
     page = doc[page_num]
     mat = fitz.Matrix(zoom, zoom)
 
+    # Get full image of the page
+    pix_full = page.get_pixmap(matrix=mat, alpha=False)
+    img = Image.frombytes("RGB", [pix_full.width, pix_full.height], pix_full.samples)
+
+    # Convert bbox and clamp to image size
     rect = fitz_rect_from_bbox(bbox, zoom)
-    pix = page.get_pixmap(matrix=mat, clip=rect, alpha=False)  # alpha=False for white bg
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    img.save(output_path)
+    x0 = max(0, min(int(rect.x0), img.width))
+    y0 = max(0, min(int(rect.y0), img.height))
+    x1 = max(0, min(int(rect.x1), img.width))
+    y1 = max(0, min(int(rect.y1), img.height))
+
+    # Only crop if bbox is valid
+    if x1 > x0 and y1 > y0:
+        cropped = img.crop((x0, y0, x1, y1))
+        cropped.save(output_path)
+    else:
+        print(f"[Warning] Invalid crop box: page={page_num+1}, bbox={bbox}")
+        create_blank_image(output_path)
+
     doc.close()
+
 
 def create_blank_image(output_path, width=800, height=600):
     """Create a blank white image"""
