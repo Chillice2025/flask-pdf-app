@@ -387,9 +387,13 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # Max 50MB upload
 
 
-@app.route("/", methods=["GET"])
+@app.route("/", methods=["GET", "POST"])
 def index():
+    if request.method == "POST":
+        # Handle file uploads and screenshot logic here
+        ...
     return render_template("index.html")
+
 
 
 def allowed_file(filename: str) -> bool:
