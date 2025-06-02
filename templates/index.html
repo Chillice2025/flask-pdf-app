@@ -6,25 +6,16 @@
 <body>
   <h1>Upload PDFs and Metadata</h1>
   <form method="POST" enctype="multipart/form-data">
-    <label>Test PDF:</label><br/>
-    <input type="file" name="test_pdf" required/><br/><br/>
+    <input type="file" name="test_pdf" required>
+    <input type="file" name="solution_pdf" required>
 
-    <label>Solution PDF:</label><br/>
-    <input type="file" name="sol_pdf" required/><br/><br/>
+    <input type="text" name="level" required placeholder="Level">
+    <input type="text" name="month" required placeholder="Month">
+    <input type="text" name="year" required placeholder="Year">
+    <input type="text" name="type" required placeholder="Type">
 
-    <label>Level:</label><br/>
-    <input type="text" name="level" required/><br/><br/>
-
-    <label>Month:</label><br/>
-    <input type="text" name="month" required/><br/><br/>
-
-    <label>Year:</label><br/>
-    <input type="text" name="year" required/><br/><br/>
-
-    <label>Type:</label><br/>
-    <input type="text" name="type" required/><br/><br/>
-
-    <button type="submit">Submit</button>
+    <button type="submit">Generate Screenshots</button>
   </form>
+
 </body>
 </html>
