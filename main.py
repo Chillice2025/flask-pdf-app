@@ -16,6 +16,7 @@ import fitz  # PyMuPDF
 from PIL import Image, ImageDraw
 import openai
 from flask import redirect, url_for
+from openai import OpenAI
 
 app = Flask(__name__) 
 START_TIME = time.time()
@@ -177,12 +178,16 @@ def call_openai_chat(
     temperature: float = 0.0
 ) -> str:
     logger.debug(f"Calling OpenAI Chat API with {len(messages)} messages")
-    response = openai.ChatCompletion.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=MAX_OPENAI_TOKENS
+    
+
+    client = OpenAI()
+
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": "Hello!"}]
     )
+    client = OpenAI()
+
     logger.debug("Received OpenAI response")
     return response["choices"][0]["message"]["content"]
 
@@ -469,7 +474,7 @@ def status():
 if __name__ == "__main__":
     import os
     # Insert your OpenAI key here directly as per your request:
-    openai.api_key = "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"
+    client = OpenAI(api_key="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")
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
