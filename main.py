@@ -18,6 +18,7 @@ import openai
 from flask import redirect, url_for
 
 app = Flask(__name__) 
+START_TIME = time.time()
 
 @app.route("/upload", methods=["GET"])
 def upload_get():
@@ -444,7 +445,12 @@ def upload():
 
 @app.route("/status", methods=["GET"])
 def status():
-    return {"status": "running", "uptime": time.time()}
+    uptime_seconds = time.time() - START_TIME
+    return {
+        "status": "running",
+        "uptime_seconds": round(uptime_seconds, 2)
+    }
+
 
 
 # -------- Main Entrypoint --------
