@@ -404,6 +404,17 @@ def allowed_file(filename: str) -> bool:
 
 @app.route("/upload", methods=["POST"])
 def upload():
+    try:
+        print("Incoming request:", request.files, request.form)
+        test_pdf = request.files["test_pdf"]
+        sol_pdf = request.files["sol_pdf"]
+        level = request.form["level"]
+        month = request.form["month"]
+        year = request.form["year"]
+        type_ = request.form["type"]
+    except Exception as e:
+        return f"Input Error: {e}", 500
+        
     if 'test_pdf' not in request.files or 'sol_pdf' not in request.files:
         logger.warning("Missing PDF files in upload request.")
         abort(400, "Missing PDF files.")
